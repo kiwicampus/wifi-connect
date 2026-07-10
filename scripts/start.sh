@@ -44,7 +44,7 @@ try_saved_networks() {
     while [ "$attempts" -gt 0 ]; do
         for conn in $(get_saved_wifi_visible); do
             printf 'Trying saved network: %s\n' "$conn"
-            if nmcli connection up "$conn" 2>/dev/null; then
+            if nmcli -w "${CONNECT_TIMEOUT:-20}" connection up "$conn" 2>/dev/null; then
                 sleep "$delay"
                 if has_internet; then
                     printf 'Connected to %s with internet\n' "$conn"
@@ -75,6 +75,14 @@ sleep ${START_SLEEP:-25}
 
 # 3. Is there Internet connectivity via a google ping?
 # wget --spider http://google.com 2>&1
+
+# Force a rescan before evaluating networks. The boot scan can fire before the
+# regulatory domain is applied, leaving passive-only channels (e.g. UNII-3 ch149
+# under an unset/world regdomain) invisible. One shared rescan + short wait lets
+# those beacons land, so get_saved_wifi_visible can see them. Cost is amortized
+# across all networks. Configurable via RESCAN_WAIT (default: 8 seconds).
+nmcli device wifi rescan 2>/dev/null || true
+sleep "${RESCAN_WAIT:-8}"
 
 # Query the network manager list of networks to cache the available access points
 nmcli -t -f SSID dev wifi list > /usr/src/app/access-points.txt
