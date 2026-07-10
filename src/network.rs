@@ -300,6 +300,33 @@ impl NetworkCommandHandler {
                     warn!("Error connecting to access point '{}': {}", ssid, e);
                 }
             }
+        } else {
+            // AP not in scan results (e.g. a passive-only / no-IR channel such as
+            // UNII-3 ch149 under an unset/world regdomain). WiFiDevice::connect
+            // requires the AP to be in the scan list, so fall back to a
+            // profile-based activation, which does NOT: NetworkManager scans and
+            // associates from the profile settings on activation. This mirrors
+            // the manual `nmcli connection add ...` + `nmcli connection up`.
+            warn!(
+                "Access point '{}' not in scan results; trying profile-based connect",
+                ssid
+            );
+            if connect_via_profile(&self.device, ssid, identity, passphrase) {
+                match wait_for_connectivity(&self.manager, 20) {
+                    Ok(has_connectivity) => {
+                        if has_connectivity {
+                            info!("Internet connectivity established");
+                        } else {
+                            warn!("Cannot establish Internet connectivity");
+                        }
+                    }
+                    Err(err) => error!("Getting Internet connectivity failed: {}", err),
+                }
+
+                return Ok(true);
+            }
+
+            warn!("Profile-based connect to '{}' failed", ssid);
         }
 
         self.access_points = get_access_points(&self.device)?;
@@ -334,6 +361,95 @@ fn init_access_point_credentials(
         }
     } else {
         AccessPointCredentials::None
+    }
+}
+
+/// Connect to a network by building a connection profile and activating it,
+/// bypassing the scan-list requirement of `WiFiDevice::connect`. Used as a
+/// fallback for access points that are not visible in the current scan (e.g.
+/// passive-only / no-IR channels). NetworkManager scans and associates from the
+/// profile settings on activation, so the AP need not be in the scan cache.
+///
+/// Security type is inferred from the credentials the captive portal collected,
+/// since there is no scanned `AccessPoint` to read `Security` flags from:
+/// a non-empty `identity` means WPA-Enterprise (PEAP/MSCHAPv2), otherwise a
+/// non-empty `passphrase` means WPA-PSK, otherwise an open network.
+///
+/// Returns true only if `nmcli connection up` reports success.
+fn connect_via_profile(device: &Device, ssid: &str, identity: &str, passphrase: &str) -> bool {
+    let iface = device.interface();
+
+    // Idempotent: drop any leftover profile with this name before recreating it.
+    let _ = process::Command::new("nmcli")
+        .args(["connection", "delete", ssid])
+        .output();
+
+    let mut add = process::Command::new("nmcli");
+    add.args([
+        "connection",
+        "add",
+        "type",
+        "wifi",
+        "con-name",
+        ssid,
+        "ifname",
+        iface,
+        "ssid",
+        ssid,
+    ]);
+    if !identity.is_empty() {
+        add.args([
+            "wifi-sec.key-mgmt",
+            "wpa-eap",
+            "802-1x.eap",
+            "peap",
+            "802-1x.phase2-auth",
+            "mschapv2",
+            "802-1x.identity",
+            identity,
+            "802-1x.password",
+            passphrase,
+        ]);
+    } else if !passphrase.is_empty() {
+        add.args(["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", passphrase]);
+    } // else: open network - no security settings
+
+    match add.output() {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            error!(
+                "nmcli connection add failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            return false;
+        }
+        Err(e) => {
+            error!("Spawning nmcli connection add failed: {}", e);
+            return false;
+        }
+    }
+
+    // -w bounds activation so an unreachable network can't stall the portal.
+    match process::Command::new("nmcli")
+        .args(["-w", "30", "connection", "up", ssid])
+        .output()
+    {
+        Ok(output) if output.status.success() => true,
+        Ok(output) => {
+            warn!(
+                "nmcli connection up failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            // Remove the profile we created so it doesn't linger unused.
+            let _ = process::Command::new("nmcli")
+                .args(["connection", "delete", ssid])
+                .output();
+            false
+        }
+        Err(e) => {
+            error!("Spawning nmcli connection up failed: {}", e);
+            false
+        }
     }
 }
 
