@@ -21,8 +21,7 @@ RUN \
         "armv7l") \
             BINARY_ARCH_NAME="armv7-unknown-linux-gnueabihf" ;;\
         *) \
-            echo >&2 "error: unsupported architecture ($DETECTED_ARCH)";
-exit 1 ;; \ 
+            echo >&2 "error: unsupported architecture ($DETECTED_ARCH)"; exit 1 ;; \ 
     esac;\
     if [ ${VERSION} = "latest" ]; then \
         export URL_PARTIAL="latest/download" ; \
