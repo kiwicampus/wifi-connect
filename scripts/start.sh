@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-export DBUS_SYSTEM_BUS_ADDRESS=unix:path=/host/run/dbus/system_bus_socket
+# Path to the host's system D-Bus socket (NetworkManager lives on the host).
+# Overridable via env for hosts that bind the socket somewhere else.
+export DBUS_SYSTEM_BUS_ADDRESS="${DBUS_SYSTEM_BUS_ADDRESS:-unix:path=/host/run/dbus/system_bus_socket}"
 
 # ------------------------------------------------------------------------------
 # Helper: check if we have internet connectivity
