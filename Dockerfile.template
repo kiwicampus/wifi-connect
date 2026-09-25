@@ -1,5 +1,5 @@
 # ---- Rust build stage ----
-FROM rust:1.76-bullseye AS rust-build
+FROM rust:1.76-bookworm AS rust-build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libdbus-1-dev \
@@ -14,7 +14,7 @@ COPY src ./src
 RUN cargo build --release
 
 # ---- UI build stage ----
-FROM node:16-bullseye-slim AS ui-build
+FROM node:16-bookworm-slim AS ui-build
 
 WORKDIR /build
 
@@ -27,7 +27,7 @@ COPY ui/tsconfig.json ./
 RUN npm run build
 
 # ---- Runtime stage ----
-FROM debian:bullseye
+FROM debian:bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
